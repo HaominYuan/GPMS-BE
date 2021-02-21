@@ -1,6 +1,5 @@
 package tstxxy.gra;
 
-import com.sun.tools.jconsole.JConsoleContext;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Promise;
 import io.vertx.core.json.JsonObject;
@@ -14,17 +13,14 @@ import io.vertx.ext.web.RoutingContext;
 
 public class MainVerticle extends AbstractVerticle {
 
-    private JWTAuth provider;
+    private JWTAuth provider = JWTAuth.create(vertx, new JWTAuthOptions()
+        .addPubSecKey(new PubSecKeyOptions()
+            .setAlgorithm("HS256")
+            .setBuffer("keyboard cat")));
 
     @Override
     public void start(Promise<Void> startPromise) throws Exception {
-        provider = JWTAuth.create(vertx, new JWTAuthOptions()
-            .addPubSecKey(new PubSecKeyOptions()
-                .setAlgorithm("HS256")
-                .setBuffer("keyboard cat")));
-
         Router router = Router.router(vertx);
-
         router.get("/login").handler(this::loginHandler);
 
         vertx.createHttpServer().requestHandler(router).listen(80, http -> {
@@ -45,13 +41,12 @@ public class MainVerticle extends AbstractVerticle {
         var params = ctx.request().params();
         String username = params.get("username");
         String password = params.get("password");
-        System.out.println(username);
-        System.out.println(password);
+
         if ("tstxxy".equals(username) && "qwer1234".equals(password)) {
-            ctx.json(new JsonObject().put("state", "Yes"));
             String token = provider.generateToken(new JsonObject().put("username", username),
-                new JWTOptions().setExpiresInSeconds(120));
-            ctx.response().putHeader("Authorization", token);
+                new JWTOptions().setExpiresInSeconds(12000));
+            ctx.response().putHeader("accessToken", token);
+            ctx.json(new JsonObject().put("state", "Yes"));
         } else {
             ctx.json(new JsonObject().put("state", "No"));
         }

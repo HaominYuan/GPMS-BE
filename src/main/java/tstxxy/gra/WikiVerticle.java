@@ -50,6 +50,11 @@ public class WikiVerticle extends AbstractVerticle {
     @Override
     public void start(Promise<Void> startPromise) {
         Future<Void> steps = prepareDatabase().compose(v -> startHttpServer());
+
+        steps.onFailure(e -> {
+            LOGGER.error(e.getMessage());
+            LOGGER.error("here");
+        });
     }
 
     private Future<Void> prepareDatabase() {
@@ -92,7 +97,6 @@ public class WikiVerticle extends AbstractVerticle {
             }
         });
 
-
         return promise.future();
     }
 
@@ -114,8 +118,6 @@ public class WikiVerticle extends AbstractVerticle {
                     LOGGER.error(e.getMessage());
                     context.fail(e.getCause());
                 });
-
-
             }).onFailure(e -> {
                 LOGGER.error(e.getMessage());
                 context.fail(e.getCause());

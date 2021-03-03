@@ -102,43 +102,31 @@ public class WikiVerticle extends AbstractVerticle {
 
     private void indexHandler(RoutingContext context) {
         dbClient.getConnection().compose(conn -> conn.query(SQL_ALL_PAGES)
-            .execute().onSuccess(rs -> {
+            .execute().compose(rs -> {
+                conn.close();
                 var it = rs.iterator();
                 final List<String> pages = new ArrayList<>();
-                rs.forEach(row -> {
-                    pages.add(row.getString("name"));
-                });
+                rs.forEach(row -> pages.add(row.getString("name")));
 
                 context.put("title", "Wiki home")
                     .put("pages", pages.stream().sorted().collect(Collectors.toList()));
 
-                templateEngine.render(context.data(), "templates/index.ftl").onSuccess(buffer -> {
-                    context.response().putHeader("Context-Type", "text/html").end(buffer);
-                }).onFailure(e -> {
-                    LOGGER.error(e.getMessage());
-                    context.fail(e.getCause());
-                });
-            }).onFailure(e -> {
-                LOGGER.error(e.getMessage());
-                context.fail(e.getCause());
-            }).eventually(v -> conn.close())
+                return templateEngine.render(context.data(), "templates/index.ftl")
+                    .compose(buffer -> context.response().putHeader("Context-Type", "text/html").end(buffer));
+            })
         ).onFailure(e -> {
             LOGGER.error(e.getMessage());
             context.fail(e.getCause());
         });
-
     }
 
     private void pageDeletionHandler(RoutingContext context) {
         String id = context.request().getParam("id");
         dbClient.getConnection().compose(conn -> conn.preparedQuery(SQL_DELETE_PAGE)
-            .execute(Tuple.of(Integer.parseInt(id)))
-            .onSuccess(v -> context.response().setStatusCode(303).putHeader("Location", "/").end())
-            .onFailure(e -> {
-                LOGGER.error(e.getMessage());
-                context.fail(e.getCause());
-            }).eventually(v -> conn.close())
-        ).onFailure(e -> {
+            .execute(Tuple.of(Integer.parseInt(id))).compose(v -> {
+                conn.close();
+                return context.response().setStatusCode(303).putHeader("Location", "/").end();
+            })).onFailure(e -> {
             LOGGER.error(e.getMessage());
             context.fail(e.getCause());
         });
@@ -148,7 +136,8 @@ public class WikiVerticle extends AbstractVerticle {
         String page = context.request().getParam("page");
 
         dbClient.getConnection().compose(conn -> conn.preparedQuery(SQL_GET_PAGE)
-            .execute(Tuple.of(page)).onSuccess(rs -> {
+            .execute(Tuple.of(page)).compose(rs -> {
+                conn.close();
                 var it = rs.iterator();
 
                 context.put("title", page)
@@ -170,16 +159,9 @@ public class WikiVerticle extends AbstractVerticle {
                         .put("content", Processor.process(EMPTY_PAGE_MARKDOWN));
                 }
 
-                templateEngine.render(context.data(), "templates/page.ftl").onSuccess(buffer -> {
-                    context.response().putHeader("Content-Type", "text/html").end(buffer);
-                }).onFailure(e -> {
-                    LOGGER.error(e.getMessage());
-                    context.fail(e.getCause());
-                });
-            }).onFailure(e -> {
-                LOGGER.error(e.getCause());
-                context.fail(e.getCause());
-            }).eventually(v -> conn.close())
+                return templateEngine.render(context.data(), "templates/page.ftl")
+                    .compose(buffer -> context.response().putHeader("Content-Type", "text/html").end(buffer));
+            })
         ).onFailure(e -> {
             LOGGER.error(e.getCause());
             context.fail(e.getCause());
@@ -200,14 +182,10 @@ public class WikiVerticle extends AbstractVerticle {
                 result = conn.preparedQuery(SQL_SAVE_PAGE).execute(Tuple.of(markDown, id));
             }
 
-            return result.onSuccess(rs -> {
-                context.response().setStatusCode(303)
-                    .putHeader("Location", "/wiki/" + title)
-                    .end();
-            }).onFailure(e -> {
-                LOGGER.error(e.getMessage());
-                context.fail(e.getCause());
-            }).eventually(v -> conn.close());
+            conn.close();
+            return result.compose(rs -> context.response().setStatusCode(303)
+                .putHeader("Location", "/wiki/" + title)
+                .end());
         }).onFailure(e -> {
             LOGGER.error(e.getMessage());
             context.fail(e.getCause());
@@ -222,6 +200,9 @@ public class WikiVerticle extends AbstractVerticle {
         }
         context.response().setStatusCode(303)
             .putHeader("Location", location)
-            .end();
+            .end().onFailure(e -> {
+            LOGGER.error(e.getMessage());
+            context.fail(e.getCause());
+        });
     }
 }

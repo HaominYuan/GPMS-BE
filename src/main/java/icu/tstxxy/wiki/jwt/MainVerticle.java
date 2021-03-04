@@ -1,5 +1,4 @@
-package tstxxy.gra;
-
+package icu.tstxxy.wiki.jwt;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,7 +40,6 @@ public class MainVerticle extends AbstractVerticle {
 
     PoolOptions poolOptions = new PoolOptions()
         .setMaxSize(5);
-
 
     @Override
     public void start(Promise<Void> startPromise) {

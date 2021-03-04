@@ -6,13 +6,25 @@
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
-        <module name="GPMS-BE" />
         <module name="gra" />
+      </profile>
+      <profile name="Annotation profile for gra" enabled="true">
+        <sourceOutputDir name="src/main/generated" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <option name="outputDirectory" value="C:\Users\yhm\Desktop\T\GPMS-BE/src/main" />
+        <processor name="io.vertx.codegen.CodeGenProcessor" />
+        <module name="GPMS-BE" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>
       <module name="GPMS-BE" target="15" />
       <module name="gra" target="11" />
     </bytecodeTargetLevel>
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="GPMS-BE" options="-AoutputDirectory=C:\Users\yhm\Desktop\T\GPMS-BE/src/main" />
+    </option>
   </component>
 </project>

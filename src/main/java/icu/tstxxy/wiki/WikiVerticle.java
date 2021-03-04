@@ -1,7 +1,10 @@
-package tstxxy.gra;
+package icu.tstxxy.wiki;
 
 import com.github.rjeschke.txtmark.Processor;
+import icu.tstxxy.wiki.database.DatabaseVerticle;
+import icu.tstxxy.wiki.http.HttpServerVerticle;
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.http.HttpServer;
@@ -46,14 +49,32 @@ public class WikiVerticle extends AbstractVerticle {
         .setPassword("qwer1234");
     private PgPool dbClient;
 
+    private void v1(Promise<Void> startPromise) {
+        Future<Void> steps = prepareDatabase().compose(v -> startHttpServer());
+        steps.onFailure(e -> {
+            LOGGER.error(e.getMessage());
+            startPromise.fail(e.getCause());
+        });
+    }
+
 
     @Override
     public void start(Promise<Void> startPromise) {
-        Future<Void> steps = prepareDatabase().compose(v -> startHttpServer());
+//        v1(startPromise);
 
-        steps.onFailure(e -> {
+        Promise<String> dbVerticleDeployment = Promise.promise();
+        vertx.deployVerticle(new DatabaseVerticle(), dbVerticleDeployment);
+        dbVerticleDeployment.future().compose(id -> {
+            Promise<String> httpVerticleDeployment = Promise.promise();
+            vertx.deployVerticle(HttpServerVerticle.class, new DeploymentOptions().setInstances(2),
+                httpVerticleDeployment);
+            return httpVerticleDeployment.future();
+        }).onSuccess(s -> {
+            LOGGER.info(s);
+            startPromise.complete();
+        }).onFailure(e -> {
             LOGGER.error(e.getMessage());
-            LOGGER.error("here");
+            startPromise.fail(e.getCause());
         });
     }
 
@@ -61,13 +82,14 @@ public class WikiVerticle extends AbstractVerticle {
         Promise<Void> promise = Promise.promise();
         dbClient = PgPool.pool(vertx, connectOptions, poolOptions);
 
-        dbClient.getConnection().compose(conn -> conn.query(SQL_CREATE_PAGES_TABLE)
-            .execute().eventually(v -> conn.close())
-        ).onFailure(e -> {
-            LOGGER.error(e.getCause());
-            promise.fail(e.getCause());
-        }).onSuccess(result -> {
+        dbClient.getConnection().compose(conn -> {
+            var result = conn.query(SQL_CREATE_PAGES_TABLE).execute();
+            conn.close();
             promise.complete();
+            return result;
+        }).onFailure(e -> {
+            LOGGER.error(e.getMessage());
+            promise.fail(e.getCause());
         });
 
         return promise.future();
@@ -86,7 +108,6 @@ public class WikiVerticle extends AbstractVerticle {
         router.post("/delete").handler(this::pageDeletionHandler);
 
         templateEngine = FreeMarkerTemplateEngine.create(vertx);
-
         server.requestHandler(router).listen(80, ar -> {
             if (ar.succeeded()) {
                 LOGGER.info("HTTP server running on port 80");

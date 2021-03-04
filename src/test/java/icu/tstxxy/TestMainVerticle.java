@@ -1,5 +1,6 @@
-package tstxxy.gra;
+package icu.tstxxy;
 
+import icu.tstxxy.wiki.jwt.MainVerticle;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;

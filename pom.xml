@@ -71,8 +71,6 @@
             <version>2.11.3</version>
         </dependency>
 
-
-        <!-- wiki -->
         <dependency>
             <groupId>io.vertx</groupId>
             <artifactId>vertx-jdbc-client</artifactId>
@@ -90,56 +88,25 @@
             <version>4.0.2</version>
         </dependency>
 
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-service-proxy</artifactId>
-        </dependency>
 
         <dependency>
             <groupId>io.vertx</groupId>
-            <artifactId>vertx-codegen</artifactId>
+            <artifactId>vertx-web-client</artifactId>
+            <version>4.0.2</version>
         </dependency>
-
-
     </dependencies>
 
     <build>
         <defaultGoal>package</defaultGoal>
 
         <plugins>
-
-            <!-- tag::codegen[] -->
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${maven-compiler-plugin.version}</version>
                 <configuration>
                     <release>15</release>
-                    <useIncrementalCompilation>false</useIncrementalCompilation>
-
-                    <annotationProcessors>
-                        <annotationProcessor>io.vertx.codegen.CodeGenProcessor</annotationProcessor>
-                    </annotationProcessors>
-                    <generatedSourcesDirectory>${project.basedir}/src/main/generated</generatedSourcesDirectory>
-                    <compilerArgs>
-                        <arg>-AoutputDirectory=${project.basedir}/src/main</arg>
-                    </compilerArgs>
                 </configuration>
             </plugin>
-            <!-- end::codegen[] -->
-
-            <!-- tag::clean[] -->
-            <plugin>
-                <artifactId>maven-clean-plugin</artifactId>
-                <configuration>
-                    <filesets>
-                        <fileset>
-                            <directory>${project.basedir}/src/main/generated</directory>
-                        </fileset>
-                    </filesets>
-                </configuration>
-            </plugin>
-            <!-- end::clean[] -->
-
             <plugin>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>${maven-shade-plugin.version}</version>

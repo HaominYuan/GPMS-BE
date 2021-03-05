@@ -41,6 +41,7 @@ public class DatabaseVerticle extends AbstractVerticle {
 
         sqlQueries.put(SqlQuery.CREATE_PAGES_TABLE, queriesProps.getProperty("create-pages-table"));
         sqlQueries.put(SqlQuery.ALL_PAGES, queriesProps.getProperty("all-pages"));
+        sqlQueries.put(SqlQuery.ALL_PAGES_DATA, queriesProps.getProperty("all-pages-data"));
         sqlQueries.put(SqlQuery.GET_PAGE, queriesProps.getProperty("get-page"));
         sqlQueries.put(SqlQuery.CREATE_PAGE, queriesProps.getProperty("create-page"));
         sqlQueries.put(SqlQuery.SAVE_PAGE, queriesProps.getProperty("save-page"));
@@ -95,6 +96,9 @@ public class DatabaseVerticle extends AbstractVerticle {
             case "delete-page":
                 deletePage(message);
                 break;
+            case "all-pages-data":
+                fetchAllPagesData(message);
+                break;
             default:
                 message.fail(ErrorCode.BAD_ACTION.ordinal(), "Bad action: " + action);
         }
@@ -140,12 +144,24 @@ public class DatabaseVerticle extends AbstractVerticle {
     }
 
     private void fetchAllPages(Message<JsonObject> message) {
-        dbClient.query(sqlQueries.get(SqlQuery.ALL_PAGES))
-            .execute().onSuccess(rs -> {
+        dbClient.query(sqlQueries.get(SqlQuery.ALL_PAGES)).execute().onSuccess(rs -> {
             var it = rs.iterator();
             final List<String> pages = new ArrayList<>();
             rs.forEach(row -> pages.add(row.getString("name")));
             message.reply(new JsonObject().put("pages", new JsonArray(pages)));
+        }).onFailure(e -> reportQueryError(message, e));
+    }
+
+    private void fetchAllPagesData(Message<JsonObject> message) {
+        dbClient.query(sqlQueries.get(SqlQuery.ALL_PAGES_DATA)).execute().onSuccess(rs -> {
+            var it = rs.iterator();
+            var pages = new JsonArray();
+            rs.forEach(row -> pages.add(
+                new JsonObject()
+                    .put("name", row.getString("name"))
+                    .put("content", row.getString("content"))
+            ));
+            message.reply(pages);
         }).onFailure(e -> reportQueryError(message, e));
     }
 

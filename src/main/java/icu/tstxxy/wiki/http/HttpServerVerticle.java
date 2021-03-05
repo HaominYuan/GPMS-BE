@@ -7,9 +7,13 @@ import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
+import io.vertx.ext.web.client.WebClient;
+import io.vertx.ext.web.client.WebClientOptions;
+import io.vertx.ext.web.codec.BodyCodec;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.templ.freemarker.FreeMarkerTemplateEngine;
 
@@ -25,6 +29,7 @@ public class HttpServerVerticle extends AbstractVerticle {
 
     private String wikiDbQueue = "wikidb.queue";
     private FreeMarkerTemplateEngine templateEngine;
+    private WebClient webClient;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -32,6 +37,7 @@ public class HttpServerVerticle extends AbstractVerticle {
 
         Router router = Router.router(vertx);
         router.get("/").handler(this::indexHandler);
+        router.get("/backup").handler(this::backupHandler);
         router.get("/wiki/:page").handler(this::pageRenderingHandler);
         router.post().handler(BodyHandler.create());
         router.post("/save").handler(this::pageUpdateHandler);
@@ -39,6 +45,7 @@ public class HttpServerVerticle extends AbstractVerticle {
         router.post("/delete").handler(this::pageDeletionHandler);
 
         templateEngine = FreeMarkerTemplateEngine.create(vertx);
+        webClient = WebClient.create(vertx, new WebClientOptions().setUserAgent("tstxxy").setSsl(true));
 
         int portNumber = config().getInteger(CONFIG_HTTP_SERVER_PORT, 80);
 
@@ -60,6 +67,41 @@ public class HttpServerVerticle extends AbstractVerticle {
                 .compose(buffer -> context.response().putHeader("Content-Type", "text/html").end(buffer));
         }).onFailure(e -> {
             LOGGER.error(e.getMessage());
+            context.fail(e.getCause());
+        });
+    }
+
+    private void backupHandler(RoutingContext context) {
+        DeliveryOptions options = new DeliveryOptions().addHeader("action", "all-pages-data");
+        vertx.eventBus().request(wikiDbQueue, new JsonObject(), options).compose(message -> {
+
+            JsonObject payload = new JsonObject()
+                .put("files", message.body())
+                .put("language", "plaintext")
+                .put("title", "tstxxy-wiki-backup")
+                .put("public", true);
+
+            return webClient.post(443, "snippets.glot.io", "/snippets")
+                .putHeader("Content-Type", "application/json")
+                .as(BodyCodec.jsonObject())
+                .sendJsonObject(payload).onSuccess(response -> {
+                    if (response.statusCode() == 200) {
+                        String url = "https://glot.io/snippets/" + response.body().getString("id");
+                        context.put("backup_gist_url", url);
+                        indexHandler(context);
+                    } else {
+                        StringBuilder m = new StringBuilder().append("Could not backup the wiki:")
+                            .append(response.statusMessage());
+                        JsonObject body = response.body();
+                        if (body != null) {
+                            m.append(System.getProperty("line.separator")).append(body.encodePrettily());
+                        }
+                        LOGGER.error(m.toString());
+                        context.fail(502);
+                    }
+                });
+        }).onFailure(e -> {
+            LOGGER.error(e.getCause());
             context.fail(e.getCause());
         });
     }

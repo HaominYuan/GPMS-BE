@@ -7,7 +7,6 @@ import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
-import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
@@ -17,43 +16,89 @@ import io.vertx.ext.web.codec.BodyCodec;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.templ.freemarker.FreeMarkerTemplateEngine;
 
+import java.util.Arrays;
 import java.util.Date;
 
 
 public class HttpServerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(HttpServerVerticle.class);
     private static final String EMPTY_PAGE_MARKDOWN = "# A new page\n\nFeel-free to write in Markdown!\n";
-
-    public static final String CONFIG_HTTP_SERVER_PORT = "http.server.port";
-    public static final String CONFIG_WIKIDB_QUEUE = "wikidb.queue";
-
-    private String wikiDbQueue = "wikidb.queue";
+    private final String wikiDbQueue = "wikidb.queue";
     private FreeMarkerTemplateEngine templateEngine;
     private WebClient webClient;
 
     @Override
     public void start(Promise<Void> startPromise) {
-        wikiDbQueue = config().getString(CONFIG_WIKIDB_QUEUE, wikiDbQueue);
-
-        Router router = Router.router(vertx);
-        router.get("/").handler(this::indexHandler);
-        router.get("/backup").handler(this::backupHandler);
-        router.get("/wiki/:page").handler(this::pageRenderingHandler);
-        router.post().handler(BodyHandler.create());
-        router.post("/save").handler(this::pageUpdateHandler);
-        router.post("/create").handler(this::pageCreateHandler);
-        router.post("/delete").handler(this::pageDeletionHandler);
-
         templateEngine = FreeMarkerTemplateEngine.create(vertx);
         webClient = WebClient.create(vertx, new WebClientOptions().setUserAgent("tstxxy").setSsl(true));
 
-        int portNumber = config().getInteger(CONFIG_HTTP_SERVER_PORT, 80);
-
         HttpServer server = vertx.createHttpServer();
-        server.requestHandler(router).listen(portNumber).onFailure(e -> {
+        server.requestHandler(getRouter()).listen(80).onFailure(e -> {
             LOGGER.error(e.getMessage());
             startPromise.fail(e.getCause());
         });
+    }
+
+    private void apiDeletePage(RoutingContext context) {
+        int id = Integer.parseInt(context.request().getParam("id"));
+        var request = new JsonObject().put("id", id);
+        var options = new DeliveryOptions().addHeader("action", "delete-page");
+
+        handleSimpleRequest(context, request, options, 200);
+    }
+
+    private void apiUpdatePage(RoutingContext context) {
+        int id = Integer.parseInt(context.request().getParam("id"));
+        var page = context.getBodyAsJson();
+        if (!validateJsonPageDocument(context, page, "markdown")) return;
+        var request = new JsonObject().put("id", id).put("markdown", page.getString("markdown"));
+        var options = new DeliveryOptions().addHeader("action", "save-page");
+        handleSimpleRequest(context, request, options, 200);
+    }
+
+    private void apiCreatePage(RoutingContext context) {
+        JsonObject page = context.getBodyAsJson();
+        if (!validateJsonPageDocument(context, page, "title", "markdown")) return;
+        var options = new DeliveryOptions().addHeader("action", "create-page");
+        var request = new JsonObject().put("title", page.getString("title"))
+            .put("markdown", page.getString("markdown"));
+
+        handleSimpleRequest(context, request, options, 201);
+    }
+
+    private void apiRoot(RoutingContext context) {
+        DeliveryOptions options = new DeliveryOptions().addHeader("action", "all-pages-data");
+        vertx.eventBus().request(wikiDbQueue, new JsonObject(), options).compose(
+            message -> context.response().setStatusCode(200)
+            .putHeader("Content-Type", "application/json")
+            .end(new JsonObject().put("success", true).put("pages", message.body()).encode()))
+            .onFailure(e -> context.response().setStatusCode(500)
+            .putHeader("Content-Type", "application/json")
+            .end(new JsonObject().put("success", true).put("error", e.getCause()).encode()));
+    }
+
+    private void apiGetPage(RoutingContext context) {
+        var id = Integer.parseInt(context.request().getParam("id"));
+        var options = new DeliveryOptions().addHeader("action", "get-page-by-id");
+        vertx.eventBus().request(wikiDbQueue, new JsonObject().put("id", id), options).compose(message -> {
+            JsonObject body = (JsonObject) message.body();
+            var response = new JsonObject();
+            if (body.getBoolean("found")) {
+                var payload = new JsonObject()
+                    .put("title", body.getString("title"))
+                    .put("id", body.getInteger("id"))
+                    .put("markdown", body.getString("content"))
+                    .put("html", Processor.process(body.getString("content")));
+                response.put("success", true).put("page", payload);
+                context.response().setStatusCode(200);
+            } else {
+                response.put("success", false).put("error", "There is no page with ID " + id);
+                context.response().setStatusCode(404);
+            }
+            return context.response().putHeader("Content-Type", "application/json").end(response.encode());
+        }).onFailure(e -> context.response().setStatusCode(500)
+            .putHeader("Content-Type", "application/json")
+            .end(new JsonObject().put("success", false).put("error", e.getMessage()).encode()));
     }
 
     private void indexHandler(RoutingContext context) {
@@ -160,9 +205,9 @@ public class HttpServerVerticle extends AbstractVerticle {
     }
 
     private void pageCreateHandler(RoutingContext context) {
-        String pageName = context.request().getParam("name");
-        String location = "/wiki/" + pageName;
-        if (pageName == null || pageName.isEmpty()) {
+        String pageTitle = context.request().getParam("title");
+        String location = "/wiki/" + pageTitle;
+        if (pageTitle == null || pageTitle.isEmpty()) {
             location = "/";
         }
         context.response().setStatusCode(303)
@@ -184,5 +229,48 @@ public class HttpServerVerticle extends AbstractVerticle {
             context.fail(e);
             LOGGER.error(e);
         });
+    }
+
+    private boolean validateJsonPageDocument(RoutingContext context, JsonObject page, String... expectedKeys) {
+        if (!Arrays.stream(expectedKeys).allMatch(page::containsKey)) {
+            LOGGER.error("Bad page creation JSON payload: "
+                + page.encodePrettily() + " from " + context.request().remoteAddress());
+            context.response().setStatusCode(400)
+                .putHeader("Content-Type", "application/json")
+                .end(new JsonObject().put("success", false).put("error", "Bad request payload").encode());
+            return false;
+        }
+        return true;
+    }
+
+    private void handleSimpleRequest(RoutingContext context, JsonObject request, DeliveryOptions options, int code) {
+        vertx.eventBus().request(wikiDbQueue, request, options).compose(message -> context.response()
+            .setStatusCode(code).putHeader("Content-Type", "application/json")
+            .end(new JsonObject().put("success", true).encode()))
+            .onFailure(e -> {
+                LOGGER.error(e.getCause());
+                context.response().setStatusCode(500).putHeader("Content-Type", "application/json")
+                    .end(new JsonObject().put("success", false).put("error", e.getMessage()).encode());
+            });
+    }
+
+    private Router getRouter() {
+        Router router = Router.router(vertx);
+        router.route().handler(BodyHandler.create());
+        router.get("/").handler(this::indexHandler);
+        router.get("/backup").handler(this::backupHandler);
+        router.get("/wiki/:page").handler(this::pageRenderingHandler);
+        router.post("/save").handler(this::pageUpdateHandler);
+        router.post("/create").handler(this::pageCreateHandler);
+        router.post("/delete").handler(this::pageDeletionHandler);
+
+        Router apiRouter = Router.router(vertx);
+        apiRouter.get("/pages").handler(this::apiRoot);
+        apiRouter.get("/pages/:id").handler(this::apiGetPage);
+        apiRouter.post("/pages").handler(this::apiCreatePage);
+        apiRouter.put("/pages/:id").handler(this::apiUpdatePage);
+        apiRouter.delete("/pages/:id").handler(this::apiDeletePage);
+        router.mountSubRouter("/api", apiRouter);
+        return router;
     }
 }

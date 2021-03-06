@@ -46,6 +46,7 @@ public class DatabaseVerticle extends AbstractVerticle {
         sqlQueries.put(SqlQuery.CREATE_PAGE, queriesProps.getProperty("create-page"));
         sqlQueries.put(SqlQuery.SAVE_PAGE, queriesProps.getProperty("save-page"));
         sqlQueries.put(SqlQuery.DELETE_PAGE, queriesProps.getProperty("delete-page"));
+        sqlQueries.put(SqlQuery.GET_PAGE_BY_ID, queriesProps.getProperty("get-page-by-id"));
     }
 
     public void start(Promise<Void> promise) throws IOException {
@@ -99,14 +100,54 @@ public class DatabaseVerticle extends AbstractVerticle {
             case "all-pages-data":
                 fetchAllPagesData(message);
                 break;
+            case "get-page-by-id":
+                fetchPageById(message);
+                break;
             default:
                 message.fail(ErrorCode.BAD_ACTION.ordinal(), "Bad action: " + action);
         }
     }
 
+    private void fetchPage(Message<JsonObject> message) {
+        String page = message.body().getString("page");
+        dbClient.preparedQuery(sqlQueries.get(SqlQuery.GET_PAGE)).execute(Tuple.of(page)).onSuccess(rs -> {
+            var it = rs.iterator();
+            var response = new JsonObject();
+            if (!it.hasNext()) {
+                response.put("found", false);
+            } else {
+                response.put("found", true);
+                var row = it.next();
+                response.put("id", row.getInteger(0))
+                    .put("rawContent", row.getString(1));
+            }
+            message.reply(response);
+        }).onFailure(e -> reportQueryError(message, e));
+    }
+
+    private void fetchPageById(Message<JsonObject> message) {
+        dbClient.preparedQuery(sqlQueries.get(SqlQuery.GET_PAGE_BY_ID))
+            .execute(Tuple.of(message.body().getInteger("id")))
+            .onSuccess(rs -> {
+                var it = rs.iterator();
+                var response = new JsonObject();
+                if (!it.hasNext()) {
+                    response.put("found", false);
+                } else {
+                    response.put("found", true);
+                    var row = it.next();
+                    response.put("id", row.getInteger("id"))
+                        .put("title", row.getString("title"))
+                        .put("content", row.getString("content"));
+                }
+                message.reply(response);
+            }).onFailure(e -> reportQueryError(message, e.getCause()));
+
+    }
+
     private void deletePage(Message<JsonObject> message) {
         dbClient.preparedQuery(sqlQueries.get(SqlQuery.DELETE_PAGE))
-            .execute(Tuple.of(message.body().getString("id")))
+            .execute(Tuple.of(message.body().getInteger("id")))
             .onSuccess(rs -> message.reply("ok"))
             .onFailure(e -> reportQueryError(message, e.getCause()));
     }
@@ -122,32 +163,15 @@ public class DatabaseVerticle extends AbstractVerticle {
     private void savePage(Message<JsonObject> message) {
         JsonObject request = message.body();
         dbClient.preparedQuery(sqlQueries.get(SqlQuery.SAVE_PAGE))
-            .execute(Tuple.of(request.getString("markdown"), request.getString("id")))
+            .execute(Tuple.of(request.getString("markdown"), request.getInteger("id")))
             .onSuccess(rs -> message.reply("ok")).onFailure(e -> reportQueryError(message, e.getCause()));
-    }
-
-    private void fetchPage(Message<JsonObject> message) {
-        String page = message.body().getString("page");
-        dbClient.preparedQuery(sqlQueries.get(SqlQuery.GET_PAGE)).execute(Tuple.of(page)).onSuccess(rs -> {
-            var it = rs.iterator();
-            var response = new JsonObject();
-            if (!it.hasNext()) {
-                response.put("found", false);
-            } else {
-                response.put("found", true);
-                var row = it.next();
-                response.put("id", row.getInteger(0));
-                response.put("rawContent", row.getString(1));
-            }
-            message.reply(response);
-        }).onFailure(e -> reportQueryError(message, e));
     }
 
     private void fetchAllPages(Message<JsonObject> message) {
         dbClient.query(sqlQueries.get(SqlQuery.ALL_PAGES)).execute().onSuccess(rs -> {
             var it = rs.iterator();
             final List<String> pages = new ArrayList<>();
-            rs.forEach(row -> pages.add(row.getString("name")));
+            rs.forEach(row -> pages.add(row.getString("title")));
             message.reply(new JsonObject().put("pages", new JsonArray(pages)));
         }).onFailure(e -> reportQueryError(message, e));
     }
@@ -158,7 +182,7 @@ public class DatabaseVerticle extends AbstractVerticle {
             var pages = new JsonArray();
             rs.forEach(row -> pages.add(
                 new JsonObject()
-                    .put("name", row.getString("name"))
+                    .put("title", row.getString("title"))
                     .put("content", row.getString("content"))
             ));
             message.reply(pages);

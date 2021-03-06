@@ -6,7 +6,7 @@
     <div class="float-right">
       <form class="form-inline" action="/create" method="post">
         <div class="form-group">
-          <input type="text" class="form-control" id="name" name="name" placeholder="New page name">
+          <input type="text" class="form-control" id="title" name="title" placeholder="New page title">
         </div>
         <button type="submit" class="btn btn-primary">Create</button>
       </form>

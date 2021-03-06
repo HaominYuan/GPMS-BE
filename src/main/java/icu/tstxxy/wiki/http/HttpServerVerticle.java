@@ -5,9 +5,12 @@ import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Promise;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.http.HttpServer;
+import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.net.JksOptions;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.client.WebClient;
@@ -32,8 +35,13 @@ public class HttpServerVerticle extends AbstractVerticle {
         templateEngine = FreeMarkerTemplateEngine.create(vertx);
         webClient = WebClient.create(vertx, new WebClientOptions().setUserAgent("tstxxy").setSsl(true));
 
-        HttpServer server = vertx.createHttpServer();
-        server.requestHandler(getRouter()).listen(80).onFailure(e -> {
+        HttpServer server = vertx.createHttpServer(new HttpServerOptions()
+            .setSsl(true)
+            .setKeyStoreOptions(new JksOptions()
+                .setPath("server-keystore.jks")
+                .setPassword("secret")));
+
+        server.requestHandler(getRouter()).listen(443).onFailure(e -> {
             LOGGER.error(e.getMessage());
             startPromise.fail(e.getCause());
         });
@@ -120,8 +128,16 @@ public class HttpServerVerticle extends AbstractVerticle {
         DeliveryOptions options = new DeliveryOptions().addHeader("action", "all-pages-data");
         vertx.eventBus().request(wikiDbQueue, new JsonObject(), options).compose(message -> {
 
+            JsonArray array = (JsonArray) message.body();
+            JsonArray newA = new JsonArray();
+            array.forEach(object -> {
+                var temp = ((JsonObject) object);
+                newA.add(new JsonObject().put("name", temp.getString("title"))
+                    .put("content", temp.getString("content")));
+            });
+
             JsonObject payload = new JsonObject()
-                .put("files", message.body())
+                .put("files", newA)
                 .put("language", "plaintext")
                 .put("title", "tstxxy-wiki-backup")
                 .put("public", true);

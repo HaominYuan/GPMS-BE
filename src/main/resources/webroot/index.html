@@ -15,8 +15,7 @@
   ~ See the License for the specific language governing permissions and
   ~ limitations under the License.
   -->
-<!--tag::head[] -->
-<html lang="en" ng-app="wikiApp"> <!--1-->
+<html lang="en" ng-app="wikiApp">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
@@ -26,7 +25,13 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.css">
   <script src="/app/angular.min.js"></script>
   <script src="https://cdn.jsdelivr.net/lodash/4.17.4/lodash.min.js"></script>
-  <script src="/app/wiki.js"></script>  <!--2-->
+  <!-- tag::load-sockjs-eventbus-scripts[] -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.3.0/sockjs.min.js"
+          crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vertx/3.5.4/vertx-eventbus.min.js"
+          crossorigin="anonymous"></script>
+  <!-- end::load-sockjs-eventbus-scripts[] -->
+  <script src="/app/wiki.js"></script>
   <style>
     body {
       padding-top: 2rem;
@@ -35,14 +40,9 @@
   </style>
 </head>
 <body>
-<!--end::head[] -->
 
-<!--tag::container[] -->
 <div class="container" ng-controller="WikiController">
-  <!-- (...) -->
-<!--end::container[] -->
 
-  <!--tag::buttons-row[] -->
   <div class="row">
 
     <div class="col-md-12">
@@ -53,13 +53,11 @@
         </button>
         <div class="dropdown-menu" aria-labelledby="pageDropdownButton">
           <a ng-repeat="page in pages track by page.id" class="dropdown-item" ng-click="load(page.id)" href="#">{{page.name}}</a>
-          <!--1-->
         </div>
       </span>
       <span>
         <button type="button" class="btn btn-secondary" ng-click="reload()"><i class="fa fa-refresh"
                                                                                aria-hidden="true"></i> Reload</button>
-        <!--2-->
       </span>
       <span>
         <button type="button" class="btn btn-secondary" ng-click="newPage()"><i class="fa fa-plus-square"
@@ -68,20 +66,27 @@
       <span class="float-right">
         <button type="button" class="btn btn-secondary" ng-click="delete()" ng-show="pageExists()"><i
           class="fa fa-trash"
-          aria-hidden="true"></i> Delete page</button> <!--3-->
+          aria-hidden="true"></i> Delete page</button>
       </span>
     </div>
 
-    <div class="col-md-12"> <!--4-->
+    <div class="col-md-12">
       <div class="invisible alert" role="alert" id="alertMessage">
         {{alertMessage}}
       </div>
     </div>
 
-  </div>
-  <!--end::buttons-row[] -->
+    <!-- tag::reload-warning[] -->
+    <div class="col-md-12">
+      <div class="alert alert-warning ng-class:{'invisible': !pageModified};" role="alert">
+        The page has been modified by another user.
+        <a href="#" ng-click="load(pageId)">Reload</a>
+      </div>
+    </div>
+    <!-- end::reload-warning[] -->
 
-  <!--tag::markdown[] -->
+  </div>
+
   <div class="row">
 
     <div class="col-md-6" id="rendering"></div>
@@ -90,7 +95,7 @@
       <form>
         <div class="form-group">
           <label for="markdown">Markdown</label>
-          <textarea id="markdown" class="form-control" rows="25" ng-model="pageMarkdown"></textarea> <!--1-->
+          <textarea id="markdown" class="form-control" rows="25" ng-model="pageMarkdown"></textarea>
         </div>
         <div class="form-group">
           <label for="pageName">Name</label>
@@ -103,11 +108,9 @@
     </div>
 
   </div>
-  <!--end::markdown[] -->
 
 </div>
 
-<!--tag::bottom[] -->
 <script src="/app/jquery-3.3.1.slim.min.js"
         integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo"
         crossorigin="anonymous"></script>
@@ -119,4 +122,3 @@
         crossorigin="anonymous"></script>
 </body>
 </html>
-<!--end::bottom[] -->

@@ -168,7 +168,7 @@ public class DatabaseVerticle extends AbstractVerticle {
     private void createPage(Message<JsonObject> message) {
         JsonObject request = message.body();
         dbClient.preparedQuery(sqlQueries.get(SqlQuery.CREATE_PAGE))
-            .execute(Tuple.of(request.getString("title"), request.getString("markdown")))
+            .execute(Tuple.of(request.getString("title"), request.getString("content")))
             .onSuccess(rs -> message.reply("ok"))
             .onFailure(e -> {
                 LOGGER.error(Thread.currentThread().getStackTrace()[1].getMethodName() + e.getMessage());

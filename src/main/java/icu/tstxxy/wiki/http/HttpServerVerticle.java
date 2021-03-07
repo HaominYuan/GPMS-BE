@@ -14,12 +14,12 @@ import io.vertx.ext.auth.JWTOptions;
 import io.vertx.ext.auth.PubSecKeyOptions;
 import io.vertx.ext.auth.jwt.JWTAuth;
 import io.vertx.ext.auth.jwt.JWTAuthOptions;
+import io.vertx.ext.bridge.PermittedOptions;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
-import io.vertx.ext.web.client.WebClient;
-import io.vertx.ext.web.client.WebClientOptions;
 import io.vertx.ext.web.handler.*;
-import io.vertx.ext.web.templ.freemarker.FreeMarkerTemplateEngine;
+import io.vertx.ext.web.handler.sockjs.SockJSBridgeOptions;
+import io.vertx.ext.web.handler.sockjs.SockJSHandler;
 
 import java.util.Arrays;
 
@@ -46,7 +46,6 @@ public class HttpServerVerticle extends AbstractVerticle {
         int id = Integer.parseInt(context.request().getParam("id"));
         var request = new JsonObject().put("id", id);
         var options = new DeliveryOptions().addHeader("action", "delete-page");
-
         handleSimpleRequest(context, request, options, 200);
     }
 
@@ -56,15 +55,30 @@ public class HttpServerVerticle extends AbstractVerticle {
         if (!validateJsonPageDocument(context, page, "markdown")) return;
         var request = new JsonObject().put("id", id).put("markdown", page.getString("markdown"));
         var options = new DeliveryOptions().addHeader("action", "save-page");
-        handleSimpleRequest(context, request, options, 200);
+
+        vertx.eventBus().request(wikiDbQueue, request, options).compose(message -> {
+            var event = new JsonObject()
+                .put("id", id)
+                .put("client", page.getString("client"));
+            vertx.eventBus().publish("page.saved", event);
+
+            return context.response()
+                .setStatusCode(200).putHeader("Content-Type", "application/json")
+                .end(new JsonObject().put("success", true).encode());
+
+        }).onFailure(e -> {
+            LOGGER.error(e.getMessage());
+            context.response().setStatusCode(500).putHeader("Content-Type", "application/json")
+                .end(new JsonObject().put("success", false).put("error", e.getMessage()).encode());
+        });
     }
 
     private void apiCreatePage(RoutingContext context) {
         JsonObject page = context.getBodyAsJson();
-        if (!validateJsonPageDocument(context, page, "title", "markdown")) return;
+        if (!validateJsonPageDocument(context, page, "title", "content")) return;
         var options = new DeliveryOptions().addHeader("action", "create-page");
         var request = new JsonObject().put("title", page.getString("title"))
-            .put("markdown", page.getString("markdown"));
+            .put("content", page.getString("markdown"));
 
         handleSimpleRequest(context, request, options, 201);
     }
@@ -144,33 +158,13 @@ public class HttpServerVerticle extends AbstractVerticle {
         });
     }
 
-    private void apiResponse(RoutingContext context, int statusCode, String jsonField, Object jsonData) {
-        context.response().setStatusCode(statusCode)
-            .putHeader("Content-Type", "application/jsoN");
-        JsonObject wrapped = new JsonObject().put("success", true);
-        if (jsonField != null && jsonData != null) {
-            wrapped.put(jsonField, jsonData);
-        }
-        context.response().end(wrapped.encode());
-    }
-
-    private void apiFailure(RoutingContext context, int statusCode, String error) {
-        context.response().setStatusCode(statusCode)
-            .putHeader("Content-Type", "application/json")
-            .end(new JsonObject()
-                .put("success", false)
-                .put("error", error).encode());
-    }
-
     private Router getRouter() {
         Router router = Router.router(vertx);
         router.route().handler(BodyHandler.create());
 
-        // static
         router.get("/app/*").handler(StaticHandler.create().setCachingEnabled(false));
         router.get("/").handler(context -> context.reroute("/app/index.html"));
 
-        // pre-rendering
         router.post("/app/markdown").handler(context -> {
             String html = Processor.process(context.getBodyAsString());
             context.response().putHeader("Content-Type", "text/html")
@@ -178,17 +172,27 @@ public class HttpServerVerticle extends AbstractVerticle {
                 .end(html);
         });
 
-
         Router apiRouter = Router.router(vertx);
 //        apiRouter.route("/pages").handler(JWTAuthHandler.create(jwtAuth));
-//        apiRouter.get("/token").handler(this::apiToken);
-
+        apiRouter.get("/token").handler(this::apiToken);
         apiRouter.get("/pages").handler(this::apiRoot);
         apiRouter.get("/pages/:id").handler(this::apiGetPage);
         apiRouter.post("/pages").handler(this::apiCreatePage);
         apiRouter.put("/pages/:id").handler(this::apiUpdatePage);
         apiRouter.delete("/pages/:id").handler(this::apiDeletePage);
         router.mountSubRouter("/api", apiRouter);
+
+        SockJSHandler sockJSHandler = SockJSHandler.create(vertx);
+        SockJSBridgeOptions options = new SockJSBridgeOptions()
+            .addInboundPermitted(new PermittedOptions().setAddress("app.markdown"))
+            .addOutboundPermitted(new PermittedOptions().setAddress("page.saved"));
+        sockJSHandler.bridge(options);
+
+        router.route("/eventbus/*").handler(sockJSHandler);
+        vertx.eventBus().<String>consumer("app.markdown", msg -> {
+            String html = Processor.process(msg.body());
+            msg.reply(html);
+        });
         return router;
     }
 }

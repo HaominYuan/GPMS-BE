@@ -15,20 +15,25 @@
  * limitations under the License.
  */
 
-// tag::module-decl[]
 'use strict';
+
+
+function generateUUID() {
+  let d = new Date().getTime();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    let r = (d + Math.random() * 16) % 16 | 0;
+    d = Math.floor(d / 16);
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
 
 angular.module("wikiApp", [])
   .controller("WikiController", ["$scope", "$http", "$timeout", function ($scope, $http, $timeout) {
 
-    var DEFAULT_PAGENAME = "Example page";
-    var DEFAULT_MARKDOWN = "# Example page\n\nSome text _here_.\n";
+    let DEFAULT_PAGENAME = "Example page";
+    let DEFAULT_MARKDOWN = "# Example page\n\nSome text _here_.\n";
 
-    // (...)
-// end::module-decl[]
-
-    // tag::new-reload-exists[]
-    $scope.newPage = function() {
+    $scope.newPage = function () {
       $scope.pageId = undefined;
       $scope.pageName = DEFAULT_PAGENAME;
       $scope.pageMarkdown = DEFAULT_MARKDOWN;
@@ -36,23 +41,22 @@ angular.module("wikiApp", [])
 
     $scope.reload = function () {
       $http.get("/api/pages").then(function (response) {
-        $scope.pages = response.data.pages.map(({title, content, ...rest}) => {
-            return {
-                name: title,
-                markdown: content,
-                ...rest
-            }
-        });
+          $scope.pages = response.data.pages.map(({title, content, ...rest}) => {
+              return {
+                  name: title,
+                  markdown: content,
+                  ...rest
+              };
+          });
       });
     };
 
     $scope.pageExists = function() {
       return $scope.pageId !== undefined;
     };
-    // end::new-reload-exists[]
 
-    // tag::load[]
     $scope.load = function (id) {
+      $scope.pageModified = false;
       $http.get("/api/pages/" + id).then(function(response) {
         var page = response.data.page;
         $scope.pageId = page.id;
@@ -65,15 +69,13 @@ angular.module("wikiApp", [])
     $scope.updateRendering = function(html) {
       document.getElementById("rendering").innerHTML = html;
     };
-    // end::load[]
 
-    // tag::save-delete-notifications[]
-    $scope.save = function() {
+    $scope.save = function () {
       var payload;
       if ($scope.pageId === undefined) {
         payload = {
           "title": $scope.pageName,
-          "markdown": $scope.pageMarkdown
+          "content": $scope.pageMarkdown
         };
         $http.post("/api/pages", payload).then(function(ok) {
           $scope.reload();
@@ -85,6 +87,7 @@ angular.module("wikiApp", [])
         });
       } else {
         var payload = {
+          "client": clientUuid,
           "markdown": $scope.pageMarkdown
         };
         $http.put("/api/pages/" + $scope.pageId, payload).then(function(ok) {
@@ -126,26 +129,48 @@ angular.module("wikiApp", [])
         alert.classList.remove("alert-danger");
       }, 5000);
     };
-    // end::save-delete-notifications[]
 
-    // tag::init[]
     $scope.reload();
     $scope.newPage();
-    // end::init[]
 
-    // tag::live-rendering[]
     var markdownRenderingPromise = null;
-    $scope.$watch("pageMarkdown", function(text) {  // <1>
+    $scope.$watch("pageMarkdown", function (text) {
+      if (eb.state !== EventBus.OPEN) return;
       if (markdownRenderingPromise !== null) {
-        $timeout.cancel(markdownRenderingPromise);  // <3>
+        $timeout.cancel(markdownRenderingPromise);
       }
       markdownRenderingPromise = $timeout(function() {
         markdownRenderingPromise = null;
-        $http.post("/app/markdown", text).then(function(response) { // <4>
-          $scope.updateRendering(response.data);
+        // tag::eventbus-markdown-sender[]
+        eb.send("app.markdown", text, function (err, reply) { // <1>
+          if (err === null) {
+            $scope.$apply(function () { // <2>
+              $scope.updateRendering(reply.body); // <3>
+            });
+          } else {
+            console.warn("Error rendering Markdown content: " + JSON.stringify(err));
+          }
         });
-      }, 300); // <2>
+        // end::eventbus-markdown-sender[]
+      }, 300);
     });
-    // end::live-rendering[]
+
+    // tag::event-bus-js-setup[]
+    var eb = new EventBus(window.location.protocol + "//" + window.location.host + "/eventbus");
+    // end::event-bus-js-setup[]
+    // tag::register-page-saved-handler[]
+    var clientUuid = generateUUID(); // <1>
+    eb.onopen = function () {
+      eb.registerHandler("page.saved", function (error, message) { // <2>
+        if (message.body // <3>
+          && $scope.pageId === message.body.id // <4>
+          && clientUuid !== message.body.client) { // <5>
+          $scope.$apply(function () { // <6>
+            $scope.pageModified = true; // <7>
+          });
+        }
+      });
+    };
+    // end::register-page-saved-handler[]
 
   }]);

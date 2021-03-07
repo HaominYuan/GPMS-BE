@@ -36,7 +36,13 @@ angular.module("wikiApp", [])
 
     $scope.reload = function () {
       $http.get("/api/pages").then(function (response) {
-        $scope.pages = response.data.pages;
+        $scope.pages = response.data.pages.map(({title, content, ...rest}) => {
+            return {
+                name: title,
+                markdown: content,
+                ...rest
+            }
+        });
       });
     };
 
@@ -66,7 +72,7 @@ angular.module("wikiApp", [])
       var payload;
       if ($scope.pageId === undefined) {
         payload = {
-          "name": $scope.pageName,
+          "title": $scope.pageName,
           "markdown": $scope.pageMarkdown
         };
         $http.post("/api/pages", payload).then(function(ok) {

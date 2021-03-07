@@ -119,7 +119,7 @@ public class DatabaseVerticle extends AbstractVerticle {
 
         dbClient.preparedQuery(sqlQueries.get(SqlQuery.AUTHENTICATE)).execute(Tuple.of(username, password))
             .onSuccess(rs -> message.reply(new JsonObject().put("found", rs.size() != 0)))
-            .onFailure(e -> reportQueryError(message, e));
+            .onFailure(e -> reportQueryError(message, e.getMessage()));
     }
 
     private void fetchPage(Message<JsonObject> message) {
@@ -136,7 +136,7 @@ public class DatabaseVerticle extends AbstractVerticle {
                     .put("rawContent", row.getString(1));
             }
             message.reply(response);
-        }).onFailure(e -> reportQueryError(message, e));
+        }).onFailure(e -> reportQueryError(message, e.getMessage()));
     }
 
     private void fetchPageById(Message<JsonObject> message) {
@@ -155,39 +155,41 @@ public class DatabaseVerticle extends AbstractVerticle {
                         .put("content", row.getString("content"));
                 }
                 message.reply(response);
-            }).onFailure(e -> reportQueryError(message, e.getCause()));
-
+            }).onFailure(e -> reportQueryError(message, e.getMessage()));
     }
 
     private void deletePage(Message<JsonObject> message) {
         dbClient.preparedQuery(sqlQueries.get(SqlQuery.DELETE_PAGE))
             .execute(Tuple.of(message.body().getInteger("id")))
             .onSuccess(rs -> message.reply("ok"))
-            .onFailure(e -> reportQueryError(message, e.getCause()));
+            .onFailure(e -> reportQueryError(message, e.getMessage()));
     }
 
     private void createPage(Message<JsonObject> message) {
         JsonObject request = message.body();
-
         dbClient.preparedQuery(sqlQueries.get(SqlQuery.CREATE_PAGE))
             .execute(Tuple.of(request.getString("title"), request.getString("markdown")))
-            .onSuccess(rs -> message.reply("ok")).onFailure(e -> reportQueryError(message, e.getCause()));
+            .onSuccess(rs -> message.reply("ok"))
+            .onFailure(e -> {
+                LOGGER.error(Thread.currentThread().getStackTrace()[1].getMethodName() + e.getMessage());
+                message.fail(ErrorCode.DB_ERROR.ordinal(), e.getMessage());
+            });
     }
 
     private void savePage(Message<JsonObject> message) {
         JsonObject request = message.body();
         dbClient.preparedQuery(sqlQueries.get(SqlQuery.SAVE_PAGE))
             .execute(Tuple.of(request.getString("markdown"), request.getInteger("id")))
-            .onSuccess(rs -> message.reply("ok")).onFailure(e -> reportQueryError(message, e.getCause()));
+            .onSuccess(rs -> message.reply("ok"))
+            .onFailure(e -> reportQueryError(message, e.getMessage()));
     }
 
     private void fetchAllPages(Message<JsonObject> message) {
         dbClient.query(sqlQueries.get(SqlQuery.ALL_PAGES)).execute().onSuccess(rs -> {
-            var it = rs.iterator();
             final List<String> pages = new ArrayList<>();
             rs.forEach(row -> pages.add(row.getString("title")));
             message.reply(new JsonObject().put("pages", new JsonArray(pages)));
-        }).onFailure(e -> reportQueryError(message, e));
+        }).onFailure(e -> reportQueryError(message, e.getMessage()));
     }
 
     private void fetchAllPagesData(Message<JsonObject> message) {
@@ -196,15 +198,16 @@ public class DatabaseVerticle extends AbstractVerticle {
             var pages = new JsonArray();
             rs.forEach(row -> pages.add(
                 new JsonObject()
+                    .put("id", row.getInteger("id"))
                     .put("title", row.getString("title"))
                     .put("content", row.getString("content"))
             ));
             message.reply(pages);
-        }).onFailure(e -> reportQueryError(message, e));
+        }).onFailure(e -> reportQueryError(message, e.getMessage()));
     }
 
-    private void reportQueryError(Message<JsonObject> message, Throwable cause) {
-        LOGGER.error(Thread.currentThread().getStackTrace()[2].getMethodName() + " Database query error", cause);
-        message.fail(ErrorCode.DB_ERROR.ordinal(), cause.getMessage());
+    private void reportQueryError(Message<JsonObject> message, String error) {
+        LOGGER.error(Thread.currentThread().getStackTrace()[2].getMethodName() + " Database query error " + error);
+        message.fail(ErrorCode.DB_ERROR.ordinal(), error);
     }
 }

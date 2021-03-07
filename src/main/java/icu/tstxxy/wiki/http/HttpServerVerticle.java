@@ -11,17 +11,24 @@ import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.JksOptions;
+import io.vertx.ext.auth.JWTOptions;
+import io.vertx.ext.auth.PubSecKeyOptions;
+import io.vertx.ext.auth.jwt.JWTAuth;
+import io.vertx.ext.auth.jwt.JWTAuthOptions;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientOptions;
 import io.vertx.ext.web.codec.BodyCodec;
-import io.vertx.ext.web.handler.BodyHandler;
+import io.vertx.ext.web.handler.*;
+import io.vertx.ext.web.sstore.LocalSessionStore;
 import io.vertx.ext.web.templ.freemarker.FreeMarkerTemplateEngine;
+import io.vertx.pgclient.PgConnectOptions;
+import io.vertx.pgclient.PgPool;
+import io.vertx.sqlclient.PoolOptions;
 
 import java.util.Arrays;
 import java.util.Date;
-
 
 public class HttpServerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(HttpServerVerticle.class);
@@ -29,11 +36,23 @@ public class HttpServerVerticle extends AbstractVerticle {
     private final String wikiDbQueue = "wikidb.queue";
     private FreeMarkerTemplateEngine templateEngine;
     private WebClient webClient;
+    private JWTAuth jwtAuth;
 
     @Override
     public void start(Promise<Void> startPromise) {
         templateEngine = FreeMarkerTemplateEngine.create(vertx);
         webClient = WebClient.create(vertx, new WebClientOptions().setUserAgent("tstxxy").setSsl(true));
+
+        PgPool dbClient = PgPool.pool(vertx, new PgConnectOptions()
+            .setPort(5432)
+            .setHost("localhost")
+            .setDatabase("wiki")
+            .setUser("postgres")
+            .setPassword("qwer1234"), new PoolOptions().setMaxSize(5));
+
+//        sqlAuth = SqlAuthentication.create(dbClient, new SqlAuthenticationOptions());
+        jwtAuth = JWTAuth.create(vertx, new JWTAuthOptions().addPubSecKey(new PubSecKeyOptions()
+            .setAlgorithm("HS256").setBuffer("secret")));
 
         HttpServer server = vertx.createHttpServer(new HttpServerOptions()
             .setSsl(true)
@@ -113,8 +132,10 @@ public class HttpServerVerticle extends AbstractVerticle {
         DeliveryOptions options = new DeliveryOptions().addHeader("action", "all-pages");
         vertx.eventBus().request(wikiDbQueue, new JsonObject(), options).compose(message -> {
             JsonObject body = (JsonObject) message.body();
-            context.put("title", "Wiki home");
-            context.put("pages", body.getJsonArray("pages").getList());
+            context.put("title", "Wiki home")
+                .put("pages", body.getJsonArray("pages").getList())
+                .put("canCreatePage", true)
+                .put("username", "asfd");
 
             return templateEngine.render(context.data(), "templates/index.ftl")
                 .compose(buffer -> context.response().putHeader("Content-Type", "text/html").end(buffer));
@@ -226,11 +247,10 @@ public class HttpServerVerticle extends AbstractVerticle {
         if (pageTitle == null || pageTitle.isEmpty()) {
             location = "/";
         }
-        context.response().setStatusCode(303)
-            .putHeader("Location", location)
-            .end().onFailure(e -> {
-            context.fail(e);
-            LOGGER.error(e);
+        context.response().setStatusCode(303).putHeader("Location", location).end()
+            .onFailure(e -> {
+                context.fail(e);
+                LOGGER.error(e);
         });
     }
 
@@ -242,8 +262,8 @@ public class HttpServerVerticle extends AbstractVerticle {
             .setStatusCode(303)
             .putHeader("Location", "/")
             .end()).onFailure(e -> {
-            context.fail(e);
-            LOGGER.error(e);
+                context.fail(e);
+                LOGGER.error(e);
         });
     }
 
@@ -270,10 +290,68 @@ public class HttpServerVerticle extends AbstractVerticle {
             });
     }
 
+    private void logoutHandler(RoutingContext context) {
+        context.clearUser();
+        context.response().setStatusCode(302).putHeader("Location", "/").end();
+    }
+
+    private void loginHandler(RoutingContext context) {
+        context.put("title", "Login");
+        templateEngine.render(context.data(), "templates/login.ftl")
+            .compose(buffer -> context.response().putHeader("Content-Type", "text/html").end(buffer))
+            .onFailure(e -> {
+                context.fail(e);
+                LOGGER.error(e.getMessage());
+            });
+    }
+
+    private void loginAuthHandler(RoutingContext context) {
+        var request = new JsonObject().put("username", context.request().getParam("username"))
+            .put("password", context.request().getParam("password"));
+        var options = new DeliveryOptions().addHeader("action", "authenticate");
+
+        vertx.eventBus().request(wikiDbQueue, request, options)
+            .compose(message -> context.response().setStatusCode(302)
+                .putHeader("Location", context.request().getParam("return_url")).end())
+            .onFailure(e -> {
+                context.fail(e.getCause());
+                LOGGER.error(e.getMessage());
+            });
+    }
+
+    private void apiToken(RoutingContext context) {
+        var request = new JsonObject().put("username", context.request().getParam("username"))
+            .put("password", context.request().getParam("password"));
+        var options = new DeliveryOptions().addHeader("action", "authenticate");
+
+        vertx.eventBus().request(wikiDbQueue, request, options).compose(message -> {
+            String token = jwtAuth.generateToken(new JsonObject().put("username", request.getString("username")),
+                new JWTOptions().setSubject("Wiki Api").setIssuer("tstxxy")
+            );
+
+            return context.response().putHeader("Content-Type", "text/plain").end(token);
+        }).onFailure(e -> {
+            context.fail(e.getCause());
+            LOGGER.error(e.getMessage());
+        });
+    }
+
     private Router getRouter() {
         Router router = Router.router(vertx);
         router.route().handler(BodyHandler.create());
-        router.get("/").handler(this::indexHandler);
+
+
+        // static
+        router.get("/app/*").handler(StaticHandler.create().setCachingEnabled(false));
+        router.get("/").handler(context -> context.reroute("/app/index.html"));
+
+
+
+
+        router.post("/login-auth").handler(this::loginAuthHandler);
+        router.get("/logout").handler(this::logoutHandler);
+//        router.get("/").handler(this::indexHandler);
+        router.get("/login").handler(this::loginHandler);
         router.get("/backup").handler(this::backupHandler);
         router.get("/wiki/:page").handler(this::pageRenderingHandler);
         router.post("/save").handler(this::pageUpdateHandler);
@@ -281,12 +359,21 @@ public class HttpServerVerticle extends AbstractVerticle {
         router.post("/delete").handler(this::pageDeletionHandler);
 
         Router apiRouter = Router.router(vertx);
+
+        jwtAuth = JWTAuth.create(vertx, new JWTAuthOptions()
+            .addPubSecKey(new PubSecKeyOptions().setAlgorithm("HS256").setBuffer("secret")));
+
+        apiRouter.route("/pages").handler(JWTAuthHandler.create(jwtAuth));
+        apiRouter.get("/token").handler(this::apiToken);
         apiRouter.get("/pages").handler(this::apiRoot);
         apiRouter.get("/pages/:id").handler(this::apiGetPage);
         apiRouter.post("/pages").handler(this::apiCreatePage);
         apiRouter.put("/pages/:id").handler(this::apiUpdatePage);
         apiRouter.delete("/pages/:id").handler(this::apiDeletePage);
+
         router.mountSubRouter("/api", apiRouter);
         return router;
     }
 }
+
+

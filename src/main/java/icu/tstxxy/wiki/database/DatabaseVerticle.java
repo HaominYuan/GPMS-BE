@@ -5,6 +5,7 @@ import io.vertx.core.Promise;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
+import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.pgclient.PgConnectOptions;
@@ -47,6 +48,7 @@ public class DatabaseVerticle extends AbstractVerticle {
         sqlQueries.put(SqlQuery.SAVE_PAGE, queriesProps.getProperty("save-page"));
         sqlQueries.put(SqlQuery.DELETE_PAGE, queriesProps.getProperty("delete-page"));
         sqlQueries.put(SqlQuery.GET_PAGE_BY_ID, queriesProps.getProperty("get-page-by-id"));
+        sqlQueries.put(SqlQuery.AUTHENTICATE, queriesProps.getProperty("authenticate"));
     }
 
     public void start(Promise<Void> promise) throws IOException {
@@ -103,9 +105,21 @@ public class DatabaseVerticle extends AbstractVerticle {
             case "get-page-by-id":
                 fetchPageById(message);
                 break;
+            case "authenticate":
+                authenticate(message);
+                break;
             default:
                 message.fail(ErrorCode.BAD_ACTION.ordinal(), "Bad action: " + action);
         }
+    }
+
+    private void authenticate(Message<JsonObject> message) {
+        String username = message.body().getString("username");
+        String password = message.body().getString("password");
+
+        dbClient.preparedQuery(sqlQueries.get(SqlQuery.AUTHENTICATE)).execute(Tuple.of(username, password))
+            .onSuccess(rs -> message.reply(new JsonObject().put("found", rs.size() != 0)))
+            .onFailure(e -> reportQueryError(message, e));
     }
 
     private void fetchPage(Message<JsonObject> message) {
